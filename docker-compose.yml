@@ -1,0 +1,187 @@
+# docker-compose.yml — local production-style stack for the SADO API.
+#
+# Boots:
+#   - api      FastAPI (uvicorn)
+#   - worker   Celery worker (audio pipeline)
+#   - db       PostgreSQL 16
+#   - redis    Redis 7 (cache, rate-limit, Celery broker)
+#   - minio    S3-compatible object store for audio recordings
+#   - createbuckets  one-shot init container that creates the audio bucket
+#
+# Usage:
+#   cp .env.example .env             # adjust DATABASE_URL etc. for compose
+#   docker compose up --build
+#
+# Override via .env: every service uses ${VAR} interpolation so you can
+# tune ports / credentials without editing the compose file.
+
+name: sado
+
+x-api-environment: &api-environment
+  APP_ENV: ${APP_ENV:-development}
+  APP_DEBUG: ${APP_DEBUG:-false}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  API_V1_PREFIX: ${API_V1_PREFIX:-/api/v1}
+  HOST: 0.0.0.0
+  PORT: 8000
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://sado:sado@db:5432/sado}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+  CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/2}
+  CELERY_TASK_ALWAYS_EAGER: ${CELERY_TASK_ALWAYS_EAGER:-false}
+  JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  ACCESS_TOKEN_EXPIRES_MIN: ${ACCESS_TOKEN_EXPIRES_MIN:-15}
+  REFRESH_TOKEN_EXPIRES_DAYS: ${REFRESH_TOKEN_EXPIRES_DAYS:-7}
+  CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:8081,http://localhost:19006}
+  MINIO_ENDPOINT: ${MINIO_ENDPOINT:-http://minio:9000}
+  MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+  MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+  MINIO_BUCKET: ${MINIO_BUCKET:-sado-audio}
+  MINIO_REGION: ${MINIO_REGION:-us-east-1}
+  LOCAL_STORAGE_DIR: /app/storage
+  RATE_LIMIT_AUTH_PER_MINUTE: ${RATE_LIMIT_AUTH_PER_MINUTE:-10}
+  MAX_AUDIO_DURATION_SEC: ${MAX_AUDIO_DURATION_SEC:-60}
+  MAX_AUDIO_SIZE_MB: ${MAX_AUDIO_SIZE_MB:-10}
+
+x-api-build: &api-build
+  context: .
+  dockerfile: Dockerfile
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-sado}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sado}
+      POSTGRES_DB: ${POSTGRES_DB:-sado}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sado} -d ${POSTGRES_DB:-sado}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  minio:
+    image: minio/minio:RELEASE.2024-09-22T00-33-43Z
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+      MINIO_REGION_NAME: ${MINIO_REGION:-us-east-1}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  createbuckets:
+    image: minio/mc:RELEASE.2024-09-16T17-43-14Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+        set -eu;
+        mc alias set local http://minio:9000 ${MINIO_ACCESS_KEY:-minioadmin} ${MINIO_SECRET_KEY:-minioadmin};
+        mc mb --ignore-existing local/${MINIO_BUCKET:-sado-audio};
+        mc anonymous set download local/${MINIO_BUCKET:-sado-audio} || true;
+        echo 'Bucket ${MINIO_BUCKET:-sado-audio} ready.'
+      "
+    restart: "no"
+
+  api:
+    build: *api-build
+    image: sado-api:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment: *api-environment
+    volumes:
+      - api_storage:/app/storage
+    ports:
+      - "${API_PORT:-8000}:8000"
+    command:
+      - sh
+      - -c
+      - |
+        set -eu
+        echo "[api] running alembic upgrade head"
+        alembic upgrade head
+        echo "[api] starting uvicorn"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/api/v1/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  worker:
+    build: *api-build
+    image: sado-api:latest
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment: *api-environment
+    volumes:
+      - api_storage:/app/storage
+    command:
+      - celery
+      - -A
+      - app.workers.celery_app:celery_app
+      - worker
+      - --loglevel=info
+      - --concurrency=${CELERY_CONCURRENCY:-2}
+      - --queues=sado.default,sado.audio
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery -A app.workers.celery_app:celery_app inspect ping -d celery@$$HOSTNAME || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  db_data:
+  redis_data:
+  minio_data:
+  api_storage:

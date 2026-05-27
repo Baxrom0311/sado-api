@@ -1,0 +1,57 @@
+# Build context exclusions — keep image small & avoid leaking secrets.
+
+# VCS / CI
+.git
+.github
+.gitignore
+.gitattributes
+
+# Python build artifacts
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/*.egg-info
+.eggs
+build
+dist
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Virtual environments
+.venv
+venv
+env
+ENV
+
+# Local databases & runtime artefacts
+*.db
+*.sqlite
+*.sqlite3
+storage
+uploads
+*.log
+
+# Editor / OS
+.idea
+.vscode
+.DS_Store
+*.swp
+*.swo
+
+# Secrets — never bake into images
+.env
+.env.*
+!.env.example
+secrets
+*.pem
+*.key
+
+# Docker-related
+Dockerfile
+docker-compose.yml
+docker-compose.*.yml
+.dockerignore
