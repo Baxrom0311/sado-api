@@ -61,6 +61,7 @@ from app.schemas.exercise import (
     ExercisePublic,
     ExerciseUpdate,
 )
+from app.services import gamification as gam_service
 from app.services.storage import get_audio_storage
 
 router = APIRouter()
@@ -810,6 +811,8 @@ async def update_assignment(
             code="ASSIGNMENT_FORBIDDEN",
         )
 
+    was_completed = assignment.status == AssignmentStatus.COMPLETED.value
+
     data = payload.model_dump(exclude_unset=True)
     if "status" in data and data["status"] is not None:
         new_status = data["status"]
@@ -825,6 +828,22 @@ async def update_assignment(
         assignment.notes = data["notes"]
     if "score" in data:
         assignment.score = data["score"]
+
+    just_completed = (
+        not was_completed
+        and assignment.status == AssignmentStatus.COMPLETED.value
+    )
+    if just_completed:
+        try:
+            await gam_service.on_exercise_completed(
+                session,
+                assignment.child_id,
+                score=assignment.score,
+            )
+        except Exception:  # pragma: no cover - never block update
+            logger.exception(
+                "Gamification hook failed for assignment %s", assignment.id
+            )
 
     await session.commit()
     await session.refresh(assignment)
@@ -849,12 +868,26 @@ async def complete_assignment(
             code="ASSIGNMENT_FORBIDDEN",
         )
 
+    was_completed = assignment.status == AssignmentStatus.COMPLETED.value
+
     assignment.status = AssignmentStatus.COMPLETED.value
     assignment.completed_at = datetime.now(UTC)
     if payload.score is not None:
         assignment.score = payload.score
     if payload.notes is not None:
         assignment.notes = payload.notes
+
+    if not was_completed:
+        try:
+            await gam_service.on_exercise_completed(
+                session,
+                assignment.child_id,
+                score=assignment.score,
+            )
+        except Exception:  # pragma: no cover - never block completion
+            logger.exception(
+                "Gamification hook failed for assignment %s", assignment.id
+            )
 
     await session.commit()
     await session.refresh(assignment)

@@ -15,6 +15,19 @@ from app.models.assessment import (
     RecordingTaskType,
     RiskLevel,
 )
+from app.models.billing import (
+    BillingPlan,
+    BillingPlanCode,
+    BillingUsageMetric,
+    BillingUsageRecord,
+    PaymentOrder,
+    PaymentOrderState,
+    PaymentProvider,
+    PaymentTransaction,
+    PaymentTransactionState,
+    Subscription,
+    SubscriptionStatus,
+)
 from app.models.child import Child
 from app.models.exercise import (
     AssignmentStatus,
@@ -24,9 +37,24 @@ from app.models.exercise import (
     ExerciseCategory,
     ExerciseDifficulty,
 )
+from app.models.gamification import (
+    Badge,
+    BadgeCategory,
+    BadgeEarning,
+    BadgeRequirementType,
+    Gamification,
+)
 from app.models.kindergarten import Kindergarten
 from app.models.notification import Notification, NotificationType
+from app.models.phoneme_mastery import MASTERY_THRESHOLD, PhonemeMastery
+from app.models.practice_plan import (
+    PracticePlan,
+    PracticePlanItem,
+    PracticePlanItemStatus,
+    PracticePlanStatus,
+)
 from app.models.region import Region, RegionType
+from app.models.tenant import SubscriptionPlan, TenantSettings
 from app.models.user import User, UserLanguage, UserRole
 
 __all__ = [
@@ -36,19 +64,43 @@ __all__ = [
     "AssessmentType",
     "AssignmentStatus",
     "AudioRecording",
+    "Badge",
+    "BadgeCategory",
+    "BadgeEarning",
+    "BadgeRequirementType",
+    "BillingPlan",
+    "BillingPlanCode",
+    "BillingUsageMetric",
+    "BillingUsageRecord",
     "Child",
     "Exercise",
     "ExerciseAgeGroup",
     "ExerciseAssignment",
     "ExerciseCategory",
     "ExerciseDifficulty",
+    "Gamification",
     "Kindergarten",
+    "MASTERY_THRESHOLD",
     "Notification",
     "NotificationType",
+    "PaymentOrder",
+    "PaymentOrderState",
+    "PaymentProvider",
+    "PaymentTransaction",
+    "PaymentTransactionState",
+    "PhonemeMastery",
+    "PracticePlan",
+    "PracticePlanItem",
+    "PracticePlanItemStatus",
+    "PracticePlanStatus",
     "RecordingTaskType",
     "Region",
     "RegionType",
     "RiskLevel",
+    "SubscriptionPlan",
+    "Subscription",
+    "SubscriptionStatus",
+    "TenantSettings",
     "User",
     "UserLanguage",
     "UserRole",

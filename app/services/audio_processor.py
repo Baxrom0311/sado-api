@@ -77,6 +77,20 @@ async def process_recording(
 
     prediction = predict_risk(features)
 
+    # Build localised therapist recommendations from the freshly
+    # extracted features + the risk prediction. We default to Uzbek
+    # because that's the SADO product's primary locale; downstream
+    # callers can re-render with another locale by invoking
+    # :func:`app.services.recommendations.build_recommendations` directly.
+    from app.services.recommendations import build_recommendations
+
+    recommendations = build_recommendations(
+        risk_level=prediction.risk_level,
+        voice_quality=features.voice_quality,
+        phoneme_scores=features.phoneme_scores,
+        locale="uz",
+    )
+
     # Upsert analysis (delete-then-insert keeps the unique constraint clean).
     existing = await session.execute(
         select(AnalysisResult).where(AnalysisResult.recording_id == recording.id)
@@ -98,6 +112,8 @@ async def process_recording(
             **features.feature_summary,
             "rationale": prediction.rationale,
         },
+        voice_quality=features.voice_quality or None,
+        recommendations=recommendations or None,
         model_name=prediction.model_name,
         model_version=prediction.model_version,
     )
@@ -166,6 +182,8 @@ async def _maybe_finalize_assessment(
     ]
     aggregate = aggregate_risk(predictions)
 
+    was_already_completed = assessment.status == AssessmentStatus.COMPLETED.value
+
     assessment.status = AssessmentStatus.COMPLETED.value
     assessment.overall_risk = aggregate.risk_level
     assessment.overall_confidence = aggregate.confidence
@@ -173,6 +191,39 @@ async def _maybe_finalize_assessment(
     assessment.summary = (
         f"Aggregated risk={aggregate.risk_level} from {len(analyses)} recording(s)."
     )
+
+    # Award gamification XP exactly once per assessment completion.
+    if not was_already_completed:
+        try:
+            from app.services import gamification as gam_service
+
+            await gam_service.on_assessment_completed(
+                session,
+                assessment.child_id,
+                risk_level=aggregate.risk_level,
+            )
+        except Exception:  # pragma: no cover - never block finalisation
+            logger.exception(
+                "Gamification hook failed for assessment %s", assessment.id
+            )
+
+        # Roll the per-recording phoneme scores into the child's
+        # cumulative mastery table. Wrapped in a defensive try/except
+        # so a mastery write can never block finalisation.
+        try:
+            from app.services.phoneme_mastery import (
+                update_mastery_from_assessment,
+            )
+
+            await update_mastery_from_assessment(
+                session, assessment_id=assessment.id
+            )
+        except Exception:  # pragma: no cover - never block finalisation
+            logger.exception(
+                "Phoneme-mastery update failed for assessment %s",
+                assessment.id,
+            )
+
     await session.commit()
 
 

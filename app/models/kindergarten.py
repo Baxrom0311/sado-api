@@ -38,7 +38,9 @@ class Kindergarten(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         "Region", back_populates="kindergartens", lazy="joined"
     )
     children: Mapped[list[Child]] = relationship(
-        "Child", back_populates="kindergarten"
+        "Child",
+        back_populates="kindergarten",
+        foreign_keys="Child.kindergarten_id",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug only

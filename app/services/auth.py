@@ -147,8 +147,12 @@ class AuthService:
 
     def issue_tokens(self, user: User) -> IssuedTokens:
         settings = get_settings()
-        access, _ = create_access_token(subject=user.id, role=user.role)
-        refresh, _ = create_refresh_token(subject=user.id, role=user.role)
+        access, _ = create_access_token(
+            subject=user.id, role=user.role, tenant_id=user.tenant_id
+        )
+        refresh, _ = create_refresh_token(
+            subject=user.id, role=user.role, tenant_id=user.tenant_id
+        )
         return IssuedTokens(
             access_token=access,
             refresh_token=refresh,

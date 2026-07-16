@@ -40,9 +40,27 @@ class Child(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
 
-    parent: Mapped[User] = relationship("User", back_populates="children")
+    # Multi-tenant — populated from ``kindergarten_id`` on creation
+    # so queries can filter by tenant without joining kindergartens.
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("kindergartens.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    parent: Mapped[User] = relationship(
+        "User", back_populates="children", foreign_keys=[parent_id]
+    )
     kindergarten: Mapped[Kindergarten | None] = relationship(
-        "Kindergarten", back_populates="children"
+        "Kindergarten",
+        back_populates="children",
+        foreign_keys=[kindergarten_id],
+    )
+    tenant: Mapped[Kindergarten | None] = relationship(
+        "Kindergarten",
+        foreign_keys=[tenant_id],
+        lazy="joined",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug only

@@ -128,6 +128,14 @@ class Exercise(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     is_active: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, index=True
     )
+    # Multi-tenant — ``NULL`` = global / system exercise visible to
+    # every tenant, otherwise the kindergarten that owns this exercise.
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("kindergartens.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_by_id: Mapped[str | None] = mapped_column(
         String(36),
         ForeignKey("users.id", ondelete="SET NULL"),

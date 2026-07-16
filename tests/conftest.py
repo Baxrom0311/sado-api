@@ -2,6 +2,11 @@
 
 Tests run against the FastAPI app with the SQLite + in-memory defaults,
 so no external services (Postgres, Redis, MinIO) are required.
+
+The default test database is a per-process SQLite file so multiple
+agents/CI shards can run the suite in parallel without colliding on
+table state. Override ``DATABASE_URL`` in the environment to point at
+a real Postgres if needed (e.g. for migration tests).
 """
 
 from __future__ import annotations
@@ -9,6 +14,7 @@ from __future__ import annotations
 import os
 import shutil
 import tempfile
+import uuid
 from collections.abc import AsyncIterator, Iterator
 
 import pytest
@@ -18,7 +24,13 @@ import pytest_asyncio
 # are cached via lru_cache so this must happen at import time.
 os.environ.setdefault("APP_ENV", "test")
 os.environ.setdefault("JWT_SECRET", "test-secret-which-is-long-enough-1234567890")
-os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test_sado.db")
+# Per-process SQLite file. Each pytest invocation gets a unique path so
+# parallel runs (orchestrator agents, CI shards) never share state.
+_DB_FILE = os.path.join(
+    tempfile.gettempdir(),
+    f"sado_test_{os.getpid()}_{uuid.uuid4().hex[:8]}.db",
+)
+os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{_DB_FILE}")
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 # Loose rate limit so each test can issue plenty of /auth requests.
 os.environ.setdefault("RATE_LIMIT_AUTH_PER_MINUTE", "1000")
@@ -48,6 +60,10 @@ async def app():
     await reset_auth_rate_limiter()
     await get_deny_list().clear()
     reset_audio_storage()
+    # Defensively drop everything from prior crashed runs before
+    # recreating the schema. ``drop_all`` is idempotent (uses
+    # ``checkfirst=True``) so this is safe on a fresh DB too.
+    await drop_all()
     await create_all()
     try:
         yield create_app()
@@ -70,15 +86,8 @@ async def client(app) -> AsyncIterator:
 
 @pytest.fixture(autouse=True)
 def _cleanup_test_db() -> Iterator[None]:
-    """Remove the SQLite test database file after each test session run."""
-
+    """Wipe per-test storage between tests."""
     yield
-    for path in ("./test_sado.db", "./test_sado.db-journal"):
-        try:
-            os.remove(path)
-        except FileNotFoundError:
-            pass
-    # Wipe storage between tests to keep keys isolated.
     if os.path.isdir(_STORAGE_DIR):
         for entry in os.listdir(_STORAGE_DIR):
             full = os.path.join(_STORAGE_DIR, entry)
@@ -89,3 +98,16 @@ def _cleanup_test_db() -> Iterator[None]:
                     os.remove(full)
             except FileNotFoundError:
                 pass
+
+
+def pytest_sessionfinish(session, exitstatus) -> None:  # noqa: ARG001
+    """Remove the per-process SQLite file when the suite ends."""
+
+    for path in (_DB_FILE, _DB_FILE + "-journal"):
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError:
+            pass
+    if os.path.isdir(_STORAGE_DIR):
+        shutil.rmtree(_STORAGE_DIR, ignore_errors=True)

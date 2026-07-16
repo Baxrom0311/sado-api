@@ -1,4 +1,4 @@
-"""Reusable FastAPI dependencies — DB session, current user, RBAC."""
+"""Reusable FastAPI dependencies — DB session, current user, RBAC, tenant scope."""
 
 from __future__ import annotations
 
@@ -45,6 +45,25 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_current_tenant_id(user: CurrentUser) -> str | None:
+    """Return the tenant id the caller's request should be scoped to.
+
+    Resolution rules:
+
+    * ``super_admin`` — returns ``None`` (no tenant scope, sees all).
+    * Any other role — returns ``user.tenant_id`` (which may itself
+      be ``None`` for legacy / unbound accounts; callers treat that as
+      "global view" identical to super_admin for backward compat).
+    """
+
+    if user.role == UserRole.SUPER_ADMIN.value:
+        return None
+    return user.tenant_id
+
+
+CurrentTenantId = Annotated[str | None, Depends(get_current_tenant_id)]
 
 
 def require_roles(*roles: UserRole):
@@ -95,9 +114,11 @@ async def enforce_auth_rate_limit(
 
 
 __all__ = [
+    "CurrentTenantId",
     "CurrentUser",
     "DBSession",
     "enforce_auth_rate_limit",
+    "get_current_tenant_id",
     "get_current_user",
     "require_roles",
 ]

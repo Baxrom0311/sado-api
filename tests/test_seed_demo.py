@@ -16,6 +16,7 @@ from app.models import (
     AnalysisResult,
     Assessment,
     AudioRecording,
+    Badge,
     Child,
     Exercise,
     Kindergarten,
@@ -41,7 +42,8 @@ async def test_seed_demo_first_run_creates_expected_counts(app) -> None:
     # 1 assessment + 1 recording + 1 analysis per child = 3 × 2 = 6.
     assert report.assessments_created == 6
     assert report.notifications_created == 3
-    assert report.total_created == 25
+    assert report.badges_created == 11
+    assert report.total_created == 36
 
     factory = get_sessionmaker()
     async with factory() as session:
@@ -55,6 +57,7 @@ async def test_seed_demo_first_run_creates_expected_counts(app) -> None:
             (AudioRecording, 2),
             (AnalysisResult, 2),
             (Notification, 3),
+            (Badge, 11),
         ):
             count = await session.scalar(select(func.count()).select_from(model))
             assert count == expected, f"{model.__name__}: expected {expected}, got {count}"

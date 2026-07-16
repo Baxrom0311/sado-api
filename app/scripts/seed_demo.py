@@ -44,6 +44,9 @@ from app.models import (
     AssessmentStatus,
     AssessmentType,
     AudioRecording,
+    Badge,
+    BadgeCategory,
+    BadgeRequirementType,
     Child,
     Exercise,
     ExerciseAgeGroup,
@@ -88,6 +91,7 @@ class SeedReport:
     exercises_created: int = 0
     assessments_created: int = 0
     notifications_created: int = 0
+    badges_created: int = 0
 
     @property
     def total_created(self) -> int:
@@ -99,6 +103,7 @@ class SeedReport:
             + self.exercises_created
             + self.assessments_created
             + self.notifications_created
+            + self.badges_created
         )
 
 
@@ -531,6 +536,187 @@ async def _seed_notifications(
     return created
 
 
+# ----------------------------------------------------------------- Badges
+
+
+_BADGE_SPECS: list[dict[str, Any]] = [
+    # Milestones — earned through XP totals.
+    {
+        "slug": "first-steps",
+        "code": "first_steps",
+        "title_uz": "Birinchi qadamlar",
+        "title_ru": "Первые шаги",
+        "description_uz": "Birinchi mashqingizni bajaring va sayohatni boshlang!",
+        "description_ru": "Выполните первое упражнение и начните путешествие!",
+        "icon": "👣",
+        "category": BadgeCategory.MILESTONE,
+        "requirement_type": BadgeRequirementType.XP,
+        "threshold": 10,
+        "sort_order": 10,
+    },
+    {
+        "slug": "xp-100",
+        "code": "xp_100",
+        "title_uz": "100 XP yig'ildi",
+        "title_ru": "Набрано 100 XP",
+        "description_uz": "Tabriklaymiz! Siz 100 ball to'pladingiz.",
+        "description_ru": "Поздравляем! Вы набрали 100 очков опыта.",
+        "icon": "⭐",
+        "category": BadgeCategory.MILESTONE,
+        "requirement_type": BadgeRequirementType.XP,
+        "threshold": 100,
+        "sort_order": 20,
+    },
+    {
+        "slug": "xp-1000",
+        "code": "xp_1000",
+        "title_uz": "1000 XP qahramoni",
+        "title_ru": "Герой 1000 XP",
+        "description_uz": "1000 ball — bu haqiqiy qahramonlik!",
+        "description_ru": "1000 очков — настоящее достижение!",
+        "icon": "🌟",
+        "category": BadgeCategory.MILESTONE,
+        "requirement_type": BadgeRequirementType.XP,
+        "threshold": 1000,
+        "sort_order": 30,
+    },
+    # Level badges.
+    {
+        "slug": "level-5",
+        "code": "level_5",
+        "title_uz": "5-bosqich",
+        "title_ru": "5-й уровень",
+        "description_uz": "Beshinchi bosqichga yetdingiz — zo'r natija!",
+        "description_ru": "Достигли пятого уровня — отличный результат!",
+        "icon": "🎖️",
+        "category": BadgeCategory.LEVEL,
+        "requirement_type": BadgeRequirementType.LEVEL,
+        "threshold": 5,
+        "sort_order": 40,
+    },
+    {
+        "slug": "level-10",
+        "code": "level_10",
+        "title_uz": "10-bosqich ustasi",
+        "title_ru": "Мастер 10-го уровня",
+        "description_uz": "O'ninchi bosqichga ko'tarildingiz!",
+        "description_ru": "Поднялись на десятый уровень!",
+        "icon": "🏆",
+        "category": BadgeCategory.LEVEL,
+        "requirement_type": BadgeRequirementType.LEVEL,
+        "threshold": 10,
+        "sort_order": 50,
+    },
+    # Streak badges.
+    {
+        "slug": "streak-3",
+        "code": "streak_3",
+        "title_uz": "3 kunlik mashq",
+        "title_ru": "3 дня подряд",
+        "description_uz": "Uch kun ketma-ket mashq qildingiz!",
+        "description_ru": "Три дня подряд занимались!",
+        "icon": "🔥",
+        "category": BadgeCategory.STREAK,
+        "requirement_type": BadgeRequirementType.STREAK,
+        "threshold": 3,
+        "sort_order": 60,
+    },
+    {
+        "slug": "streak-7",
+        "code": "streak_7",
+        "title_uz": "Hafta jangchisi",
+        "title_ru": "Воин недели",
+        "description_uz": "Bir hafta to'xtamasdan mashq qildingiz!",
+        "description_ru": "Целую неделю без перерыва!",
+        "icon": "🔥",
+        "category": BadgeCategory.STREAK,
+        "requirement_type": BadgeRequirementType.STREAK,
+        "threshold": 7,
+        "sort_order": 70,
+    },
+    {
+        "slug": "streak-30",
+        "code": "streak_30",
+        "title_uz": "Oy qahramoni",
+        "title_ru": "Герой месяца",
+        "description_uz": "30 kun davomida har kuni mashq qildingiz!",
+        "description_ru": "30 дней непрерывных занятий!",
+        "icon": "💎",
+        "category": BadgeCategory.STREAK,
+        "requirement_type": BadgeRequirementType.STREAK,
+        "threshold": 30,
+        "sort_order": 80,
+    },
+    # Practice volume.
+    {
+        "slug": "practice-10",
+        "code": "exercises_10",
+        "title_uz": "10 mashq bajarildi",
+        "title_ru": "10 упражнений выполнено",
+        "description_uz": "O'n mashqni muvaffaqiyatli yakunladingiz.",
+        "description_ru": "Успешно завершили десять упражнений.",
+        "icon": "📚",
+        "category": BadgeCategory.PRACTICE,
+        "requirement_type": BadgeRequirementType.EXERCISES_COMPLETED,
+        "threshold": 10,
+        "sort_order": 90,
+    },
+    {
+        "slug": "practice-50",
+        "code": "exercises_50",
+        "title_uz": "50 mashq ustasi",
+        "title_ru": "Мастер 50 упражнений",
+        "description_uz": "50 ta mashqni yakunladingiz — ajoyib!",
+        "description_ru": "Завершили 50 упражнений — превосходно!",
+        "icon": "🎓",
+        "category": BadgeCategory.PRACTICE,
+        "requirement_type": BadgeRequirementType.EXERCISES_COMPLETED,
+        "threshold": 50,
+        "sort_order": 100,
+    },
+    # Special — first assessment.
+    {
+        "slug": "first-assessment",
+        "code": "first_assessment",
+        "title_uz": "Birinchi tahlil",
+        "title_ru": "Первая оценка",
+        "description_uz": "Birinchi nutq tahlilingizni topshirdingiz!",
+        "description_ru": "Прошли первую речевую оценку!",
+        "icon": "🎤",
+        "category": BadgeCategory.SPECIAL,
+        "requirement_type": BadgeRequirementType.ASSESSMENTS_COMPLETED,
+        "threshold": 1,
+        "sort_order": 110,
+    },
+]
+
+
+async def _seed_badges(session: AsyncSession) -> int:
+    """Insert the catalogue of bilingual badges."""
+
+    created = 0
+    for spec in _BADGE_SPECS:
+        badge_id = _seed_id("badge", spec["slug"])
+        _, was_new = await _ensure(
+            session,
+            Badge,
+            badge_id,
+            code=spec["code"],
+            title_uz=spec["title_uz"],
+            title_ru=spec["title_ru"],
+            description_uz=spec["description_uz"],
+            description_ru=spec["description_ru"],
+            icon=spec["icon"],
+            category=spec["category"].value,
+            requirement_type=spec["requirement_type"].value,
+            threshold=spec["threshold"],
+            sort_order=spec["sort_order"],
+            is_active=True,
+        )
+        created += int(was_new)
+    return created
+
+
 # ------------------------------------------------------------- Public API
 
 
@@ -574,6 +760,8 @@ async def seed_demo(session: AsyncSession | None = None) -> SeedReport:
 
         notifications_created = await _seed_notifications(session, users, children)
 
+        badges_created = await _seed_badges(session)
+
         if own_session:
             await session.commit()
     except Exception:
@@ -592,10 +780,11 @@ async def seed_demo(session: AsyncSession | None = None) -> SeedReport:
         exercises_created=exercises_created,
         assessments_created=assessments_created,
         notifications_created=notifications_created,
+        badges_created=badges_created,
     )
     logger.info(
         "seed_demo done: regions=%d users=%d kindergartens=%d children=%d "
-        "exercises=%d assessments=%d notifications=%d",
+        "exercises=%d assessments=%d notifications=%d badges=%d",
         report.regions_created,
         report.users_created,
         report.kindergartens_created,
@@ -603,6 +792,7 @@ async def seed_demo(session: AsyncSession | None = None) -> SeedReport:
         report.exercises_created,
         report.assessments_created,
         report.notifications_created,
+        report.badges_created,
     )
     return report
 

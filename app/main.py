@@ -36,6 +36,28 @@ OPENAPI_TAGS = [
     {"name": "regions", "description": "Geographic regions of Uzbekistan."},
     {"name": "stats", "description": "Aggregated statistics for dashboards."},
     {"name": "notifications", "description": "User notifications inbox."},
+    {
+        "name": "gamification",
+        "description": "XP, levels, streaks, badges, and leaderboards.",
+    },
+    {
+        "name": "tenants",
+        "description": "Multi-tenant management (kindergartens as tenants).",
+    },
+    {
+        "name": "practice-plans",
+        "description": (
+            "Personalised practice plans generated from assessments — "
+            "bridge between recommendations and concrete exercises."
+        ),
+    },
+    {
+        "name": "billing",
+        "description": (
+            "Subscription plans, payment orders, and Payme/Click "
+            "webhooks. Free users keep working without any paid plan."
+        ),
+    },
 ]
 
 

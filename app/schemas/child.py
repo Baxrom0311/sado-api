@@ -153,6 +153,7 @@ class ChildPublic(BaseModel):
     notes: str | None
     parent_id: str
     kindergarten_id: str | None
+    tenant_id: str | None = None
     created_at: datetime
     updated_at: datetime
     age_years: int = Field(
@@ -177,6 +178,7 @@ class ChildPublic(BaseModel):
             notes=child.notes,
             parent_id=child.parent_id,
             kindergarten_id=child.kindergarten_id,
+            tenant_id=getattr(child, "tenant_id", None),
             created_at=child.created_at,
             updated_at=child.updated_at,
             age_years=max(0, age),

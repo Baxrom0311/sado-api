@@ -16,10 +16,13 @@ That gives us:
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 import random
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 # Mock vocabularies — picked to be plausible for Uzbek speech therapy
 # prompts. The transcript chosen is deterministic per audio hash.
@@ -60,6 +63,9 @@ class SpeechFeatures:
     formant_data: dict[str, Any] = field(default_factory=dict)
     phoneme_scores: dict[str, Any] = field(default_factory=dict)
     feature_summary: dict[str, Any] = field(default_factory=dict)
+    # Clinical voice-quality block (jitter/shimmer/HNR/speech rate).
+    # Defaults to an empty dict so older code paths keep working.
+    voice_quality: dict[str, Any] = field(default_factory=dict)
 
 
 def _seeded_rng(audio_bytes: bytes) -> random.Random:
@@ -159,14 +165,80 @@ def extract_features(
     *,
     declared_duration_sec: float | None = None,
 ) -> SpeechFeatures:
+    """Run the configured speech-feature pipeline.
+
+    Behaviour is controlled by ``Settings.audio_analysis_backend``:
+
+    * ``"mock"`` — always run the deterministic mock pipeline.
+    * ``"real"`` — always run the librosa/parselmouth pipeline; raise
+      if the native libs are missing.
+    * ``"auto"`` (default) — try the real pipeline first, transparently
+      fall back to the mock if it is unavailable or blows up. This is
+      the safest setting for production where we want real analysis
+      whenever possible without breaking dev / test environments.
+    """
+
+    if not audio_bytes:
+        raise ValueError("empty audio payload")
+
+    backend = _resolve_backend()
+
+    if backend == "real":
+        from app.services.real_audio_features import extract_real_features
+
+        return extract_real_features(
+            audio_bytes,
+            declared_duration_sec=declared_duration_sec,
+        )
+
+    if backend == "auto":
+        from app.services.real_audio_features import (
+            RealAnalyzerUnavailableError,
+            extract_real_features,
+            is_available,
+        )
+
+        if is_available():
+            try:
+                return extract_real_features(
+                    audio_bytes,
+                    declared_duration_sec=declared_duration_sec,
+                )
+            except RealAnalyzerUnavailableError as exc:
+                logger.info(
+                    "Real audio backend unavailable (%s) — falling back to mock", exc
+                )
+            except Exception:  # pragma: no cover - defensive
+                logger.exception(
+                    "Real audio backend errored — falling back to mock"
+                )
+
+    return _extract_mock_features(
+        audio_bytes, declared_duration_sec=declared_duration_sec
+    )
+
+
+def _resolve_backend() -> str:
+    """Return the configured backend, defaulting to ``"auto"`` on error."""
+
+    try:
+        from app.config import get_settings
+
+        return str(getattr(get_settings(), "audio_analysis_backend", "auto"))
+    except Exception:  # pragma: no cover - settings should always load
+        return "auto"
+
+
+def _extract_mock_features(
+    audio_bytes: bytes,
+    *,
+    declared_duration_sec: float | None = None,
+) -> SpeechFeatures:
     """Run the mock pipeline over one recording and return features.
 
     The output is fully deterministic for a given byte payload so
     snapshot-style tests stay stable between runs.
     """
-
-    if not audio_bytes:
-        raise ValueError("empty audio payload")
 
     rng = _seeded_rng(audio_bytes)
 
@@ -191,6 +263,15 @@ def extract_features(
 
     confidence = round(rng.uniform(0.55, 0.95), 3)
 
+    from app.services.voice_quality import compute_voice_quality_mock
+
+    voice_quality = compute_voice_quality_mock(
+        audio_bytes,
+        transcript=transcript,
+        duration_sec=duration,
+        voiced_ratio=pitch["voiced_ratio"],
+    )
+
     summary = {
         "duration_sec": round(duration, 2),
         "sample_rate": sample_rate,
@@ -201,6 +282,11 @@ def extract_features(
         "f1_mean": formants["f1_mean"],
         "f2_mean": formants["f2_mean"],
         "weakest_phonemes": [item["phoneme"] for item in phonemes["weakest"]],
+        "backend": "mock",
+        "jitter_local_pct": voice_quality["jitter_local_pct"],
+        "shimmer_local_pct": voice_quality["shimmer_local_pct"],
+        "hnr_db": voice_quality["hnr_db"],
+        "speech_rate_wpm": voice_quality["speech_rate_wpm"],
     }
 
     return SpeechFeatures(
@@ -213,6 +299,7 @@ def extract_features(
         formant_data=formants,
         phoneme_scores=phonemes,
         feature_summary=summary,
+        voice_quality=voice_quality,
     )
 
 

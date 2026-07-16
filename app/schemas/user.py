@@ -49,6 +49,7 @@ class UserPublic(BaseModel):
     is_active: bool
     is_verified: bool
     region_id: str | None
+    tenant_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

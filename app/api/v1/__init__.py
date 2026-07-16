@@ -5,13 +5,17 @@ from fastapi import APIRouter
 from app.api.v1 import (
     assessments,
     auth,
+    billing,
     children,
     exercises,
+    gamification,
     health,
     kindergartens,
     notifications,
+    practice_plans,
     regions,
     stats,
+    tenants,
     users,
 )
 
@@ -26,5 +30,9 @@ api_router.include_router(assessments.router, tags=["assessments"])
 api_router.include_router(exercises.router, tags=["exercises"])
 api_router.include_router(stats.router, tags=["stats"])
 api_router.include_router(notifications.router, tags=["notifications"])
+api_router.include_router(gamification.router, tags=["gamification"])
+api_router.include_router(tenants.router, tags=["tenants"])
+api_router.include_router(practice_plans.router, tags=["practice-plans"])
+api_router.include_router(billing.router, tags=["billing"])
 
 __all__ = ["api_router"]

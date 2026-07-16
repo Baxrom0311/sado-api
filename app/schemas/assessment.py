@@ -68,6 +68,7 @@ class AssessmentPublic(BaseModel):
     summary: str | None
     started_at: datetime | None
     completed_at: datetime | None
+    tenant_id: str | None = None
     created_at: datetime
     updated_at: datetime
     recordings: list[AudioRecordingPublic] = Field(default_factory=list)
@@ -100,6 +101,7 @@ class AssessmentPublic(BaseModel):
             summary=assessment.summary,
             started_at=assessment.started_at,
             completed_at=assessment.completed_at,
+            tenant_id=getattr(assessment, "tenant_id", None),
             created_at=assessment.created_at,
             updated_at=assessment.updated_at,
             recordings=[
@@ -124,6 +126,9 @@ class AnalysisPublic(BaseModel):
     model_name: str
     model_version: str
     created_at: datetime
+    # Localised therapist hints — safe to expose to parents because
+    # they do not leak raw acoustic features.
+    recommendations: list[dict[str, Any]] | None = None
 
 
 class AnalysisDetailedPublic(AnalysisPublic):
@@ -133,6 +138,8 @@ class AnalysisDetailedPublic(AnalysisPublic):
     pitch_data: dict[str, Any] | None = None
     formant_data: dict[str, Any] | None = None
     phoneme_scores: dict[str, Any] | None = None
+    voice_quality: dict[str, Any] | None = None
+    recommendations: list[dict[str, Any]] | None = None
 
 
 class AssessmentAnalysisResponse(BaseModel):

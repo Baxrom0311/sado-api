@@ -40,6 +40,17 @@ dev = [
     "moto[s3]==5.0.16",
     "ruff==0.6.9",
 ]
+# Native audio analysis stack — librosa + soundfile + parselmouth.
+# Install via ``pip install -e '.[audio]'`` to enable the real backend
+# of ``app.services.speech_analyzer.extract_features``. The API runs
+# fine without these (mock backend), so they stay optional to keep the
+# CI image small and avoid pulling system libsndfile / Praat at boot.
+audio = [
+    "numpy>=1.26,<3.0",
+    "soundfile==0.12.1",
+    "librosa==0.10.2",
+    "praat-parselmouth==0.4.5",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

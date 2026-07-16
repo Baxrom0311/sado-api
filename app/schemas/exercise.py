@@ -196,6 +196,7 @@ class ExercisePublic(BaseModel):
     target_phonemes: str | None
     is_active: bool
     created_by_id: str | None
+    tenant_id: str | None = None
     created_at: datetime
     updated_at: datetime
 

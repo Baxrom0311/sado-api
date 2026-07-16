@@ -80,6 +80,38 @@ class Settings(BaseSettings):
     max_audio_duration_sec: int = 60
     max_audio_size_mb: int = 10
 
+    # ----------------------------------------------------------- Billing
+    # Payme Merchant API credentials. The merchant key is used as the
+    # HTTP Basic password Payme signs every webhook with — the test
+    # default keeps webhook tests deterministic without leaking the
+    # production key. Override in production via env vars.
+    payme_merchant_id: str = "test_merchant"
+    payme_merchant_key: str = "test-payme-key"
+    payme_test_key: str = "test-payme-test-key"
+    payme_checkout_url: str = "https://checkout.paycom.uz"
+
+    # Click Merchant API credentials.
+    click_merchant_id: str = "0"
+    click_service_id: str = "0"
+    click_secret_key: str = "test-click-secret"
+    click_checkout_url: str = "https://my.click.uz"
+
+    # Feature flag — when ``False`` no quota enforcement is applied to
+    # free users (grace period default during the billing rollout).
+    billing_enforce_quotas: bool = False
+
+    # Which speech-feature backend ``app.services.speech_analyzer`` uses:
+    #
+    # * ``"mock"`` — deterministic synthetic features (default for tests
+    #   and when no native audio libs are installed).
+    # * ``"real"`` — strict real-audio pipeline using librosa /
+    #   soundfile / parselmouth. Raises if libraries are missing or
+    #   extraction fails so the failure is visible to operators.
+    # * ``"auto"`` — try real first, fall back to mock if the libs are
+    #   not installed or extraction blows up. Best for production where
+    #   we want to opportunistically run the real pipeline.
+    audio_analysis_backend: Literal["mock", "real", "auto"] = "auto"
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _normalize_cors(cls, value: object) -> str:

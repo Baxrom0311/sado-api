@@ -1,4 +1,4 @@
-"""User model — parents, teachers, therapists, and admins."""
+"""User model — parents, teachers, therapists, admins, super-admins."""
 
 from __future__ import annotations
 
@@ -13,12 +13,21 @@ from app.models._base import TimestampMixin, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:  # pragma: no cover
     from app.models.child import Child
+    from app.models.kindergarten import Kindergarten
     from app.models.region import Region
 
 
 class UserRole(str, enum.Enum):
-    """All supported principal roles. Stored as text for portability."""
+    """All supported principal roles. Stored as text for portability.
 
+    ``SUPER_ADMIN`` is the platform-wide administrator that can see
+    every tenant. ``ADMIN`` is scoped to a single tenant (kindergarten
+    director). ``THERAPIST`` may operate across tenants they are
+    assigned to. ``TEACHER`` and ``PARENT`` are tenant-scoped (parents
+    via their children's tenant assignment).
+    """
+
+    SUPER_ADMIN = "super_admin"
     PARENT = "parent"
     TEACHER = "teacher"
     THERAPIST = "therapist"
@@ -76,14 +85,30 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         index=True,
     )
 
+    # Multi-tenant — ``tenant_id`` references the kindergarten that
+    # owns this user. ``NULL`` means the user is global (super-admin,
+    # legacy seeds, or therapists not yet bound to a tenant).
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("kindergartens.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     region: Mapped[Region | None] = relationship(
         "Region", back_populates="users", lazy="joined"
+    )
+    tenant: Mapped[Kindergarten | None] = relationship(
+        "Kindergarten",
+        foreign_keys=[tenant_id],
+        lazy="joined",
     )
     children: Mapped[list[Child]] = relationship(
         "Child",
         back_populates="parent",
         cascade="all, delete-orphan",
         passive_deletes=True,
+        foreign_keys="Child.parent_id",
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debug only

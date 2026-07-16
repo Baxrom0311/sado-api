@@ -20,9 +20,19 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, File, Form, Path, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    File,
+    Form,
+    Header,
+    Path,
+    Query,
+    Response,
+    UploadFile,
+    status,
+)
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +52,7 @@ from app.core.pagination import (
     encode_cursor,
 )
 from app.models.assessment import (
+    AnalysisResult,
     Assessment,
     AssessmentStatus,
     AssessmentType,
@@ -62,6 +73,11 @@ from app.schemas.assessment import (
     AudioRecordingPublic,
 )
 from app.services.audio_processor import process_recording
+from app.services.recommendations import (
+    DEFAULT_LOCALE,
+    SUPPORTED_LOCALES,
+    build_recommendations,
+)
 from app.services.storage import build_recording_key, get_audio_storage
 
 logger = logging.getLogger(__name__)
@@ -161,6 +177,73 @@ def _ensure_visible(user: User, assessment: Assessment) -> None:
         )
 
 
+def _resolve_locale(
+    requested: str | None,
+    accept_language: str | None,
+    user: User,
+) -> str:
+    """Return the locale for rendering recommendations.
+
+    Resolution priority:
+
+    1. Explicit ``?locale=`` query param if it is a supported code.
+    2. The first ``Accept-Language`` tag whose primary subtag is supported.
+    3. The user's saved ``language`` preference if supported.
+    4. :data:`app.services.recommendations.DEFAULT_LOCALE` (Uzbek).
+
+    Accepts ``uz-UZ``, ``ru-RU``, etc. by stripping the region subtag.
+    """
+
+    def _normalise(candidate: str | None) -> str | None:
+        if not candidate:
+            return None
+        primary = candidate.strip().lower().split("-")[0].split(";")[0].strip()
+        if primary in SUPPORTED_LOCALES:
+            return primary
+        return None
+
+    locale = _normalise(requested)
+    if locale:
+        return locale
+
+    if accept_language:
+        # Header looks like "ru-RU,ru;q=0.9,en;q=0.8" — try each tag.
+        for tag in accept_language.split(","):
+            locale = _normalise(tag)
+            if locale:
+                return locale
+
+    locale = _normalise(getattr(user, "language", None))
+    if locale:
+        return locale
+
+    return DEFAULT_LOCALE
+
+
+def _localised_recommendations(
+    analysis: AnalysisResult, locale: str
+) -> list[dict[str, Any]] | None:
+    """Re-render the recommendations payload for the given locale.
+
+    Always rebuilds from the stored acoustic features (``voice_quality``,
+    ``phoneme_scores``, ``risk_level``) so the wording matches the
+    requested locale even though the original ML pipeline persisted
+    Uzbek copy. When no inputs are available we fall back to whatever
+    is stored on the row to preserve backwards compatibility with
+    analyses produced before voice-quality features were captured.
+    """
+
+    rebuilt = build_recommendations(
+        risk_level=analysis.risk_level,
+        voice_quality=analysis.voice_quality,
+        phoneme_scores=analysis.phoneme_scores,
+        locale=locale,
+    )
+    if rebuilt:
+        return rebuilt
+    return analysis.recommendations
+
+
 # --------------------------------------------------------------- Endpoints
 
 
@@ -204,6 +287,10 @@ async def create_assessment(
         type=payload.type,
         status=AssessmentStatus.PENDING.value,
         started_at=datetime.now(UTC),
+        # Inherit tenant from the child so multi-tenant scoping
+        # filters (and per-tenant stats) stay consistent without
+        # requiring callers to supply tenant_id explicitly.
+        tenant_id=getattr(child, "tenant_id", None),
     )
     session.add(assessment)
     await session.commit()
@@ -511,11 +598,28 @@ async def get_analysis(
     user: CurrentUser,
     session: DBSession,
     assessment_id: Annotated[str, Path(min_length=1, max_length=36)],
+    locale: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Language for recommendations: 'uz', 'ru', or 'en'. "
+                "Falls back to the Accept-Language header, then the user's "
+                "saved preference, then Uzbek."
+            ),
+            max_length=10,
+        ),
+    ] = None,
+    accept_language: Annotated[
+        str | None,
+        Header(alias="Accept-Language", description="Standard IETF language header"),
+    ] = None,
 ) -> AssessmentAnalysisResponse:
     assessment = await _load_assessment_or_404(
         session, assessment_id, with_analysis=True
     )
     _ensure_visible(user, assessment)
+
+    resolved_locale = _resolve_locale(locale, accept_language, user)
 
     # Recordings + their analyses are already eager-loaded; iterate in
     # memory rather than issuing a second SELECT against analysis_results.
@@ -537,6 +641,7 @@ async def get_analysis(
                 model_name=a.model_name,
                 model_version=a.model_version,
                 created_at=a.created_at,
+                recommendations=_localised_recommendations(a, resolved_locale),
             )
             for a in analyses
         ],
@@ -552,6 +657,21 @@ async def get_analysis_detailed(
     user: CurrentUser,
     session: DBSession,
     assessment_id: Annotated[str, Path(min_length=1, max_length=36)],
+    locale: Annotated[
+        str | None,
+        Query(
+            description=(
+                "Language for recommendations: 'uz', 'ru', or 'en'. "
+                "Falls back to the Accept-Language header, then the user's "
+                "saved preference, then Uzbek."
+            ),
+            max_length=10,
+        ),
+    ] = None,
+    accept_language: Annotated[
+        str | None,
+        Header(alias="Accept-Language", description="Standard IETF language header"),
+    ] = None,
 ) -> AssessmentDetailedAnalysisResponse:
     if user.role not in {UserRole.THERAPIST.value, UserRole.ADMIN.value}:
         raise ForbiddenError(
@@ -561,6 +681,8 @@ async def get_analysis_detailed(
     assessment = await _load_assessment_or_404(
         session, assessment_id, with_analysis=True
     )
+
+    resolved_locale = _resolve_locale(locale, accept_language, user)
 
     # Eager-loaded relation removes the need for a separate
     # ``select(AnalysisResult)`` round-trip per recording.
@@ -586,6 +708,8 @@ async def get_analysis_detailed(
                 pitch_data=a.pitch_data,
                 formant_data=a.formant_data,
                 phoneme_scores=a.phoneme_scores,
+                voice_quality=a.voice_quality,
+                recommendations=_localised_recommendations(a, resolved_locale),
             )
             for a in analyses
         ],

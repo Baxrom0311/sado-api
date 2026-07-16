@@ -89,6 +89,14 @@ class Assessment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         index=True,
     )
+    # Multi-tenant — populated from the child's tenant when an
+    # assessment is created. ``NULL`` means tenant-less / legacy.
+    tenant_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("kindergartens.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     type: Mapped[str] = mapped_column(
         String(20),
@@ -205,6 +213,16 @@ class AnalysisResult(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     formant_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     phoneme_scores: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     feature_summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Clinical voice-quality metrics: jitter, shimmer, HNR, speech rate.
+    # Populated by :mod:`app.services.voice_quality` — backwards-compatible
+    # NULL for analyses created before this column existed.
+    voice_quality: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # Therapist-style recommendations rendered in the user's locale by
+    # :mod:`app.services.recommendations`. Each item is a dict with
+    # ``code``, ``severity`` and a localised ``message`` field.
+    recommendations: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSON, nullable=True
+    )
 
     model_name: Mapped[str] = mapped_column(String(100), nullable=False, default="mock-xgb-v1")
     model_version: Mapped[str] = mapped_column(String(40), nullable=False, default="0.1.0")

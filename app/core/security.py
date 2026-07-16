@@ -40,6 +40,7 @@ class TokenPayload(BaseModel):
     jti: str
     iat: int
     exp: int
+    tenant_id: str | None = None
 
 
 # ---------------------------------------------------------------- Hashing
@@ -94,8 +95,14 @@ def create_token(
     token_type: TokenType,
     jti: str | None = None,
     extra_claims: dict[str, Any] | None = None,
+    tenant_id: str | None = None,
 ) -> tuple[str, TokenPayload]:
-    """Create a signed JWT and return ``(token, payload)``."""
+    """Create a signed JWT and return ``(token, payload)``.
+
+    ``tenant_id`` is stamped into the JWT body when supplied so the
+    tenant scope of a request is decided at token mint time rather than
+    on every DB hit.
+    """
 
     settings = get_settings()
     issued = _now()
@@ -108,6 +115,8 @@ def create_token(
         "iat": int(issued.timestamp()),
         "exp": int(expires.timestamp()),
     }
+    if tenant_id is not None:
+        claims["tenant_id"] = tenant_id
     if extra_claims:
         # Don't let callers overwrite reserved claims.
         for key, value in extra_claims.items():
@@ -118,12 +127,26 @@ def create_token(
     return token, payload
 
 
-def create_access_token(*, subject: str, role: str) -> tuple[str, TokenPayload]:
-    return create_token(subject=subject, role=role, token_type=TokenType.ACCESS)
+def create_access_token(
+    *, subject: str, role: str, tenant_id: str | None = None
+) -> tuple[str, TokenPayload]:
+    return create_token(
+        subject=subject,
+        role=role,
+        token_type=TokenType.ACCESS,
+        tenant_id=tenant_id,
+    )
 
 
-def create_refresh_token(*, subject: str, role: str) -> tuple[str, TokenPayload]:
-    return create_token(subject=subject, role=role, token_type=TokenType.REFRESH)
+def create_refresh_token(
+    *, subject: str, role: str, tenant_id: str | None = None
+) -> tuple[str, TokenPayload]:
+    return create_token(
+        subject=subject,
+        role=role,
+        token_type=TokenType.REFRESH,
+        tenant_id=tenant_id,
+    )
 
 
 def decode_token(token: str, *, expected_type: TokenType | None = None) -> TokenPayload:

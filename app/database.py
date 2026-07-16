@@ -49,6 +49,19 @@ def _engine_kwargs(settings: Settings) -> dict[str, Any]:
     # pooling so each request gets a fresh connection.
     if settings.database_url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+    elif "asyncpg" in settings.database_url:
+        # When tests (or any caller) pin a non-default schema via the
+        # ``DATABASE_SCHEMA`` env var we propagate it through asyncpg
+        # ``server_settings`` so every pooled connection joins the
+        # session with the correct ``search_path``. This keeps parallel
+        # test runs isolated on a shared Postgres instance.
+        import os
+
+        schema = os.environ.get("DATABASE_SCHEMA")
+        if schema:
+            kwargs["connect_args"] = {
+                "server_settings": {"search_path": f"{schema},public"}
+            }
     return kwargs
 
 
